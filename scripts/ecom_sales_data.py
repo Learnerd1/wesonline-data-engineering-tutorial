@@ -138,6 +138,55 @@ def transform_to_silver():
                        ,mode='replace',schema='silver_layer')
     print('done')
 
+def load_gold():
+    t = 'silver_layer.cart_user_enriched'
+    queries = {
+        # Who are our best customers?
+        'customer_sales_summary': f'''
+            SELECT "userId", customer_name, city, country,
+                   COUNT(DISTINCT cart_id) AS total_carts,
+                   SUM(product_quantity)::int AS total_items,
+                   ROUND(SUM(product_total)::numeric, 2) AS total_spent
+            FROM {t}
+            GROUP BY "userId", customer_name, city, country
+            ORDER BY total_spent DESC''',
+        # Which products sell most?
+        'product_performance': f'''
+            SELECT product_id, product_name,
+                   SUM(product_quantity)::int AS units_sold,
+                   ROUND(SUM(product_total)::numeric, 2) AS revenue,
+                   COUNT(DISTINCT cart_id) AS carts_containing
+            FROM {t}
+            GROUP BY product_id, product_name
+            ORDER BY revenue DESC''',
+        # Where does revenue come from?
+        'sales_by_location': f'''
+            SELECT country, state,
+                   COUNT(DISTINCT "userId") AS customers,
+                   COUNT(DISTINCT cart_id) AS carts,
+                   ROUND(SUM(product_total)::numeric, 2) AS revenue
+            FROM {t}
+            GROUP BY country, state
+            ORDER BY revenue DESC''',
+        # How big is a typical cart?
+        'cart_summary': f'''
+            SELECT cart_id, "userId",
+                   COUNT(*) AS different_products,
+                   SUM(product_quantity)::int AS total_items,
+                   ROUND(SUM(product_total)::numeric, 2) AS cart_value
+            FROM {t}
+            GROUP BY cart_id, "userId"
+            ORDER BY cart_value DESC''',
+    }
+    try:
+        for name, q in queries.items():
+            df = loader.read_df(q)
+            loader.write_to_db(data_df=df, table_name=name,
+                               mode='replace', schema='gold_layer')
+            print(f'Gold table done: {name}')
+    except Exception as err:
+        print(f'Failed gold layer with Error : {err}')
+        raise
 
 if __name__ == '__main__':
     run_module = sys.argv[1]
@@ -147,3 +196,5 @@ if __name__ == '__main__':
         load_cart_sales()
     elif run_module == 'enrich':
         transform_to_silver()
+    elif run_module == 'gold':
+        load_gold()
